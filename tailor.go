@@ -14,7 +14,8 @@ import (
 )
 
 type Tailor struct {
-	Next httpserver.Handler
+	Next   httpserver.Handler
+	Config TailorConfig
 }
 
 type Fragment struct {
@@ -28,7 +29,7 @@ type Fragment struct {
 	Method      string
 }
 
-func readFragment(e *goquery.Selection) (Fragment, error) {
+func readFragment(e *goquery.Selection, defaultTimeout time.Duration) (Fragment, error) {
 	var f Fragment
 	id, hasID := e.Attr("id")
 	if !hasID {
@@ -50,9 +51,13 @@ func readFragment(e *goquery.Selection) (Fragment, error) {
 	timeoutStr, hasTimeout := e.Attr("timeout")
 	if hasTimeout {
 		timeout, timeoutErr := strconv.Atoi(timeoutStr)
-		f.Timeout = time.Millisecond * time.Duration(timeout)
+		if timeoutErr != nil {
+			f.Timeout = defaultTimeout
+		} else {
+			f.Timeout = time.Millisecond * time.Duration(timeout)
+		}
 	} else {
-		f.Timeout = time.Second * 60
+		f.Timeout = defaultTimeout
 	}
 
 	fallbackSrc, hasFallbackSrc := e.Attr("fallback-src")
@@ -104,7 +109,7 @@ func (t Tailor) ServeHTTP(w http.ResponseWriter, r *http.Request) (int, error) {
 	}
 
 	doc.Find("fragment").Each(func(i int, elem *goquery.Selection) {
-		f, err := readFragment(elem)
+		f, err := readFragment(elem, t.Config.DefaultTimeout)
 
 		// Error reading all fragment options.
 		// Exit here.
@@ -114,6 +119,11 @@ func (t Tailor) ServeHTTP(w http.ResponseWriter, r *http.Request) (int, error) {
 		}
 
 		resp, respErr := doRequest(f.Method, f.Src, f.Timeout, f.FallbackSrc)
+
+		if respErr != nil && t.Config.ShowFragmentError {
+			elem.ReplaceWithHtml(respErr.Error())
+			return
+		}
 
 		if f.IsPrimary {
 			status = resp.StatusCode
